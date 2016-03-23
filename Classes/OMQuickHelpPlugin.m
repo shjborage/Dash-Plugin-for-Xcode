@@ -15,13 +15,17 @@
 #define kOMQuickHelpOpenInDashStyle           @"OMOpenInDashStyle"
 #define kOMDashPlatformDetectionEnabled       @"OMDashPlatformDetectionEnabled"
 #define kOMSearchDocumentationOpenInDashStyle @"OMSearchDocumentationOpenInDashStyle"
+#define kOMDebugMode NO
 
 typedef NS_ENUM(NSInteger, OMQuickHelpPluginIntegrationStyle) {
     OMQuickHelpPluginIntegrationStyleDisabled = 0,  // Disable this plugin altogether
     OMQuickHelpPluginIntegrationStyleQuickHelp,     // Search Dash instead of showing the "Quick Help" popup
-    OMQuickHelpPluginIntegrationStyleReference,      // Show the "Quick Help" popup, but search Dash instead
+    OMQuickHelpPluginIntegrationStyleReference,     // Show the "Quick Help" popup, but search Dash instead
                                                     // of showing Xcode's documentation viewer (when the "Reference" link
                                                     // in the popup is clicked)
+                                                    // DISABLED: There's no way to get the search term from the new style
+                                                    // of links Apple's using, especially for Swift terms like
+                                                    // IntegerLiteralConvertible
 };
 
 typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
@@ -58,27 +62,48 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
             return;
 		}
 		NSString *symbolString = [self valueForKeyPath:@"selectedExpression.symbolString"];
+        if(kOMDebugMode)
+        {
+            NSLog(@"om_showQuickHelp with symbolString: %@", symbolString);
+        }
+        if(dashStyle == OMQuickHelpPluginIntegrationStyleQuickHelp)
+        {
+            // handle three-finger tap
+            @try {
+                id mouseOverExpression = [self valueForKeyPath:@"mouseOverExpression"];
+                id mouseOverExpressionString = [mouseOverExpression valueForKeyPath:@"symbolString"];
+                if([mouseOverExpressionString length] && (!symbolString || ![mouseOverExpressionString isEqualToString:symbolString]))
+                {
+                    BOOL dashOpened = [self om_showQuickHelpForSearchString:mouseOverExpressionString];
+                    if (!dashOpened) {
+                        [self om_dashNotInstalledFallback];
+                    }
+                    return;
+                }
+            }
+            @catch(NSException *exception) {}
+        }
         if(symbolString.length)
         {
             if (dashStyle == OMQuickHelpPluginIntegrationStyleQuickHelp) {
-                BOOL success = NO;
-                @try {
-                    Class quickHelpCommandHandler = NSClassFromString(@"IDEQuickHelpCommandHandler");
-                    if(quickHelpCommandHandler)
-                    {
-                        id commandHandler = [quickHelpCommandHandler handlerForAction:@selector(showDocumentationForSymbol:) withSelectionSource:self];
-                        [commandHandler performSelector:@selector(showDocumentationForSymbol:) withObject:self];
-                        success = YES;
-                    }
-                }
-                @catch(NSException *exception) { }
-                if(!success)
-                {
+//                BOOL success = NO;
+//                @try {
+//                    Class quickHelpCommandHandler = NSClassFromString(@"IDEQuickHelpCommandHandler");
+//                    if(quickHelpCommandHandler)
+//                    {
+//                        id commandHandler = [quickHelpCommandHandler handlerForAction:@selector(showDocumentationForSymbol:) withSelectionSource:self];
+//                        [commandHandler performSelector:@selector(showDocumentationForSymbol:) withObject:self];
+//                        success = YES;
+//                    }
+//                }
+//                @catch(NSException *exception) { }
+//                if(!success)
+//                {
                     BOOL dashOpened = [self om_showQuickHelpForSearchString:symbolString];
                     if (!dashOpened) {
                         [self om_dashNotInstalledFallback];
                     }
-                }
+//                }
             } else {
                 // Show regular quick help--wait to search Dash until the user clicks on a link
                 //No, this is not an infinite loop because the method is swizzled
@@ -110,6 +135,10 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
         }
 
         NSString *symbolString = [[OMQuickHelpPlugin currentEditor] valueForKeyPath:@"selectedExpression.symbolString"];
+        if(kOMDebugMode)
+        {
+            NSLog(@"om_searchDocumentationForSelectedText with symbolString: %@", symbolString);
+        }
         if (symbolString.length)
         {
             BOOL dashOpened = [self om_showQuickHelpForSearchString:symbolString];
@@ -137,10 +166,18 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
             return;
         }
 
+        if(kOMDebugMode)
+        {
+            NSLog(@"om_handleLinkClickWithActionInformation with info: %@", info);
+        }
         // Dismiss the quick help popup
         [[self valueForKey:@"quickHelpController"] performSelector:@selector(closeQuickHelp)];
 
         NSURL *dashURL = [self om_dashURLFromQuickHelpLinkActionInformation:info];
+        if(kOMDebugMode)
+        {
+            NSLog(@"om_handleLinkClickWithActionInformation with dashURL: %@", dashURL);
+        }
         if (dashURL) {
             BOOL dashOpened = [self om_openDashFromURL:dashURL];
             if (!dashOpened) {
@@ -178,6 +215,10 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
                     {
                         id editor = [OMQuickHelpPlugin currentEditor];
                         NSString *symbolString = [editor valueForKeyPath:@"selectedExpression.symbolString"];
+                        if(kOMDebugMode)
+                        {
+                            NSLog(@"om_loadDocURL with symbolString: %@, call stack: %@", symbolString, [NSThread callStackSymbols]);
+                        }
                         if([symbolString isEqualToString:ancestorNames[0]])
                         {
                             BOOL dashOpened = [self om_showQuickHelpForSearchString:symbolString];
@@ -192,6 +233,10 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
         }
         @catch(NSException *exception) { }
         NSURL *dashURL = [self om_dashURLFromAppleDocURL:url];
+        if(kOMDebugMode)
+        {
+            NSLog(@"om_loadDocURL with dashURL: %@, call stack: %@", dashURL, [NSThread callStackSymbols]);
+        }
         if (dashURL) {
             BOOL dashOpened = [self om_openDashFromURL:dashURL];
             if (!dashOpened) {
@@ -212,6 +257,10 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
 {
     id editor = [OMQuickHelpPlugin currentEditor];
     NSString *symbolString = [editor valueForKeyPath:@"selectedExpression.symbolString"];
+    if(kOMDebugMode)
+    {
+        NSLog(@"om_revertToDefaultSymbolSearch with symbolString: %@", symbolString);
+    }
     if(symbolString.length)
     {
         BOOL dashOpened = [self om_showQuickHelpForSearchString:symbolString];
@@ -246,7 +295,7 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
     searchString = [self om_appendActiveSchemeKeyword:searchString];
 	NSPasteboard *pboard = [NSPasteboard pasteboardWithUniqueName];
 	[pboard setString:searchString forType:NSStringPboardType];
-	return NSPerformService(@"Look Up in Dash", pboard) || NSPerformService(@"Look Up in Dash Beta", pboard);
+	return NSPerformService(@"Look Up in Dash Beta", pboard) || NSPerformService(@"Look Up in Dash", pboard);
 }
 
 - (BOOL)om_shouldHandleLinkClickWithActionInformation:(id)info {
@@ -287,13 +336,19 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
 }
 
 - (NSURL *)om_dashURLFromAppleDocURL:(NSURL *)url {
+    return nil;
     if(![url fragment] || [[url fragment] rangeOfString:@"apple_ref"].location == NSNotFound)
     {
         return nil;
     }
-    return [self om_dashURLForResultWithName:[self om_dashResultNameFromAppleDocURL:url]
-                                        type:[self om_dashResultTypeFromAppleDocURL:url]
-                                        path:[self om_dashResultPathFromAppleDocURL:url]];
+    NSURL *dashURL = [self om_dashURLForResultWithName:[self om_dashResultNameFromAppleDocURL:url]
+                                                  type:[self om_dashResultTypeFromAppleDocURL:url]
+                                                  path:[self om_dashResultPathFromAppleDocURL:url]];
+    if(kOMDebugMode)
+    {
+        NSLog(@"om_dashURLFromAppleDocURL appleDocURL: %@, dashURL: %@", url, dashURL);
+    }
+    return dashURL;
 }
 
 // Determine the type of the result, e.g. "Class" (cl)
@@ -316,7 +371,13 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
 
 // Determine the name of the result/page to show, e.g. "NSAlert"
 - (NSString *)om_dashResultNameFromAppleDocURL:(NSURL *)url {
-    return [[url absoluteString] lastPathComponent];
+    NSString *urlString = [url absoluteString];
+    NSString *lastPathComponent = [urlString lastPathComponent];
+    if([lastPathComponent hasPrefix:@"c:"] && [urlString dh_contains:@"/swift/"])
+    {
+        return [[lastPathComponent dh_substringFromLastOccurrenceOfStringExceptSuffix:@"@"] dh_substringFromLastOccurrenceOfStringExceptSuffix:@")"];
+    }
+    return lastPathComponent;
 }
 
 // Determine the path to open
@@ -373,7 +434,7 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
         NSString *urlString = [dashURL absoluteString];
         NSPasteboard *pboard = [NSPasteboard pasteboardWithUniqueName];
         [pboard setString:urlString forType:NSStringPboardType];
-        return NSPerformService(@"Look Up in Dash", pboard) || NSPerformService(@"Look Up in Dash Beta", pboard);
+        return NSPerformService(@"Look Up in Dash Beta", pboard) || NSPerformService(@"Look Up in Dash", pboard);
     }
     return [[NSWorkspace sharedWorkspace] openURL:dashURL];
 }
@@ -437,9 +498,14 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
                 if(destination && [destination isKindOfClass:[NSString class]] && destination.length)
                 {
                     destination = [destination lowercaseString];
+                    if(kOMDebugMode)
+                    {
+                        NSLog(@"Platform detection found %@ as the targetIdentifier", destination);
+                    }
                     BOOL iOS = [destination hasPrefix:@"iphone"] || [destination hasPrefix:@"ipad"] || [destination hasPrefix:@"ios"];
                     BOOL mac = [destination hasPrefix:@"mac"] || [destination hasPrefix:@"osx"];
-                    if(iOS || mac)
+                    BOOL tvos = [destination hasPrefix:@"appletvos"];
+                    if(iOS || mac || tvos)
                     {
                         if(dashHasPluginURL)
                         {
@@ -448,33 +514,45 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
                             {
                                 if(iOS)
                                 {
-                                    searchString = [@"dash-plugin://keys=cpp,iphoneos,appledoc,cocos2dx,cocos2d,cocos3d,kobold2d,sparrow,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                    searchString = [@"dash-plugin://keys=cpp,iphoneos,watchos,appledoc,cocoapods,cocos2dx,cocos2d,cocos3d,kobold2d,sparrow,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
                                 }
-                                else
+                                else if(mac)
                                 {
-                                    searchString = [@"dash-plugin://keys=cpp,macosx,appledoc,cocos2dx,cocos2d,cocos3d,kobold2d,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                    searchString = [@"dash-plugin://keys=cpp,macosx,appledoc,cocoapods,cocos2dx,cocos2d,cocos3d,kobold2d,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                }
+                                else if(tvos)
+                                {
+                                    searchString = [@"dash-plugin://keys=cpp,tvos,appledoc,cocoapods,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
                                 }
                             }
                             else if(isSwift)
                             {
                                 if(iOS)
                                 {
-                                    searchString = [@"dash-plugin://keys=swift,iphoneos,appledoc,cocos2d,cocos3d,kobold2d,sparrow,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                    searchString = [@"dash-plugin://keys=iphoneos,watchos,swift,appledoc,cocoapods,cocos2d,cocos3d,kobold2d,sparrow&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
                                 }
                                 else if(mac)
                                 {
-                                    searchString = [@"dash-plugin://keys=swift,macosx,appledoc,cocos2d,cocos3d,kobold2d,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                    searchString = [@"dash-plugin://keys=macosx,swift,appledoc,cocoapods,cocos2d,cocos3d,kobold2d&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                }
+                                else if(tvos)
+                                {
+                                    searchString = [@"dash-plugin://keys=tvos,swift,appledoc,cocoapods&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
                                 }
                             }
                             else
                             {
                                 if(iOS)
                                 {
-                                    searchString = [@"dash-plugin://keys=iphoneos,appledoc,cocos2d,cocos3d,kobold2d,sparrow&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                    searchString = [@"dash-plugin://keys=iphoneos,watchos,appledoc,cocoapods,cocos2d,cocos3d,kobold2d,sparrow&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
                                 }
                                 else if(mac)
                                 {
-                                    searchString = [@"dash-plugin://keys=macosx,appledoc,cocos2d,cocos3d,kobold2d&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                    searchString = [@"dash-plugin://keys=macosx,appledoc,cocoapods,cocos2d,cocos3d,kobold2d&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                                }
+                                else if(tvos)
+                                {
+                                    searchString = [@"dash-plugin://keys=tvos,appledoc,cocoapods&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
                                 }
                             }
                         }
@@ -514,6 +592,10 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
                                 {
                                     found = YES;
                                 }
+                                else if(tvos && ([platform hasPrefix:@"tvos"]))
+                                {
+                                    found = YES;
+                                }
                                 if(found)
                                 {
                                     NSString *keyword = [docset objectForKey:@"keyword"];
@@ -533,7 +615,7 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
                 {
                     if(isObjectiveCPP)
                     {
-                        searchString = [@"dash-plugin://keys=cpp,iphoneos,macosx,appledoc,cocos2dx,cocos2d,cocos3d,kobold2d,sparrow,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+                        searchString = [@"dash-plugin://keys=cpp,iphoneos,macosx,watchos,tvos,appledoc,cocos2dx,cocos2d,cocos3d,kobold2d,sparrow,c,manpages&query=" stringByAppendingString:[searchString stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
                     }
                 }
             }
@@ -603,41 +685,106 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
 
 + (void)pluginDidLoad:(NSBundle *)plugin
 {
-	static dispatch_once_t onceToken;
-
-	dispatch_once(&onceToken, ^{
-		if (NSClassFromString(@"IDESourceCodeEditor") != NULL) {
-            [NSClassFromString(@"IDESourceCodeEditor") jr_swizzleMethod:@selector(showQuickHelp:) withMethod:@selector(om_showQuickHelp:) error:NULL];
-			[NSClassFromString(@"IDESourceCodeEditor") jr_swizzleMethod:@selector(_searchDocumentationForSelectedText:) withMethod:@selector(om_searchDocumentationForSelectedText:) error:NULL];
-		}
-
-		Class quickHelpControllerClass = NSClassFromString(@"IDEQuickHelpOneShotWindowContentViewController");
-		if (quickHelpControllerClass) {
-		    [quickHelpControllerClass jr_swizzleMethod:@selector(handleLinkClickWithActionInformation:)
-		                                    withMethod:@selector(om_handleLinkClickWithActionInformation:) error:NULL];
-		}
-        
-		Class quickHelpQueryResult = NSClassFromString(@"IDEQuickHelpQueryResult");
-		if (quickHelpQueryResult) {
-		    [quickHelpQueryResult jr_swizzleClassMethod:@selector(queryResultForToken:ancestorHierarchy:)
-                     withClassMethod:@selector(om_queryResultForToken:ancestorHierarchy:) error:NULL];
-		}
-
-        Class docCommandHandlerClass = NSClassFromString(@"IDEDocCommandHandler");
-        if (docCommandHandlerClass) {
-            [docCommandHandlerClass jr_swizzleClassMethod:@selector(loadURL:)
-                                          withClassMethod:@selector(om_loadDocURL:) error:NULL];
-            [docCommandHandlerClass jr_swizzleMethod:@selector(searchDocumentationForSelectedText:)
-                                          withMethod:@selector(om_searchDocumentationForSelectedText:) error:NULL];
+    NSString *currentApplicationName = [[NSBundle mainBundle] infoDictionary][@"CFBundleName"];
+    if([currentApplicationName hasPrefix:@"Xcode"])
+    {
+        if([[NSRunningApplication currentApplication] isFinishedLaunching])
+        {
+            [[OMQuickHelpPlugin sharedInstance] swizzle];
         }
-
-        Class helpMenuDelegateClass = NSClassFromString(@"IDEHelpMenuDelegate");
-        if (helpMenuDelegateClass) {
-            if (![helpMenuDelegateClass jr_swizzleMethod:@selector(buildMenu:) withMethod:@selector(om_buildMenu:) error:NULL]) NSBeep();
-        }
-	});
+        // This is needed because Xcode 6.4+ loads the plugin before loading its own stuff (i.e. IDESourceCodeEditor),
+        // which causes swizzle to fail
+        [[NSNotificationCenter defaultCenter] addObserver:[OMQuickHelpPlugin sharedInstance] selector:@selector(swizzle) name:NSApplicationDidFinishLaunchingNotification object:nil];
+    }
 }
 
+- (void)swizzle
+{
+    @synchronized([OMQuickHelpPlugin class]) {
+        if(!self.didSwizzle)
+        {
+            if (NSClassFromString(@"IDESourceCodeEditor") != NULL) {
+                self.didSwizzle = YES;
+                if(![NSClassFromString(@"IDESourceCodeEditor") jr_swizzleMethod:@selector(showQuickHelp:) withMethod:@selector(om_showQuickHelp:) error:NULL])
+                {
+                    NSLog(@"OMQuickHelp: Couldn't swizzle showQuickHelp:");
+                }
+                if(![NSClassFromString(@"IDESourceCodeEditor") jr_swizzleMethod:@selector(_searchDocumentationForSelectedText:) withMethod:@selector(om_searchDocumentationForSelectedText:) error:NULL])
+                {
+                    NSLog(@"OMQuickHelp: Couldn't swizzle _searchDocumentationForSelectedText:");
+                }
+            }
+            else
+            {
+                NSLog(@"OMQuickHelp: Couldn't find class IDESourceCodeEditor");
+                ++self.swizzleRetryCount;
+                if(self.swizzleRetryCount < 10)
+                {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        [self swizzle];
+                    });
+                }
+                return;
+            }
+            
+            Class quickHelpControllerClass = NSClassFromString(@"IDEQuickHelpOneShotWindowContentViewController");
+            if (quickHelpControllerClass) {
+                if(![quickHelpControllerClass jr_swizzleMethod:@selector(handleLinkClickWithActionInformation:)
+                                                    withMethod:@selector(om_handleLinkClickWithActionInformation:) error:NULL])
+                {
+                    NSLog(@"OMQuickHelp: Couldn't swizzle handleLinkClickWithActionInformation:");
+                }
+            }
+            else
+            {
+                NSLog(@"OMQuickHelp: Couldn't find class IDEQuickHelpOneShotWindowContentViewController");
+            }
+            
+            Class quickHelpQueryResult = NSClassFromString(@"IDEQuickHelpQueryResult");
+            if (quickHelpQueryResult) {
+                if(![quickHelpQueryResult jr_swizzleClassMethod:@selector(queryResultForToken:ancestorHierarchy:)
+                                                withClassMethod:@selector(om_queryResultForToken:ancestorHierarchy:) error:NULL])
+                {
+                    NSLog(@"OMQuickHelp: Couldn't swizzle queryResultForToken:ancestorHierarchy:");
+                }
+            }
+            else
+            {
+                NSLog(@"OMQuickHelp: Couldn't find class IDEQuickHelpQueryResult");
+            }
+            
+            Class docCommandHandlerClass = NSClassFromString(@"IDEDocCommandHandler");
+            if (docCommandHandlerClass) {
+//                if(![docCommandHandlerClass jr_swizzleClassMethod:@selector(loadURL:)
+//                                                  withClassMethod:@selector(om_loadDocURL:) error:NULL])
+//                {
+//                    NSLog(@"OMQuickHelp: Couldn't swizzle loadURL:");
+//                }
+                if(![docCommandHandlerClass jr_swizzleMethod:@selector(searchDocumentationForSelectedText:)
+                                                  withMethod:@selector(om_searchDocumentationForSelectedText:) error:NULL])
+                {
+                    NSLog(@"OMQuickHelp: Couldn't swizzle searchDocumentationForSelectedText:");
+                }
+            }
+            else
+            {
+                NSLog(@"OMQuickHelp: Couldn't find class IDEDocCommandHandler");
+            }
+            
+            Class helpMenuDelegateClass = NSClassFromString(@"IDEHelpMenuDelegate");
+            if (helpMenuDelegateClass) {
+                if(![helpMenuDelegateClass jr_swizzleMethod:@selector(buildMenu:) withMethod:@selector(om_buildMenu:) error:NULL])
+                {
+                    NSLog(@"OMQuickHelp: Couldn't swizzle buildMenu:");
+                }
+            }
+            else
+            {
+                NSLog(@"OMQuickHelp: Couldn't find class IDEHelpMenuDelegate");
+            }
+        }
+    }
+}
 
 -(id)init
 {
@@ -669,15 +816,19 @@ typedef NS_ENUM(NSInteger, OMSearchDocumentationPluginIntegrationStyle) {
         [quickHelpStyleItem setTarget:self];
         [quickHelpIntegrationStyleMenuItems addObject:quickHelpStyleItem];
 
-        NSMenuItem *quickHelpReferenceLinkStyleItem = [dashMenu addItemWithTitle:@"Replace Quick Help Reference Link" action:@selector(toggleIntegrationStyle:) keyEquivalent:@""];
-        quickHelpReferenceLinkStyleItem.tag = OMQuickHelpPluginIntegrationStyleReference;
-        [quickHelpReferenceLinkStyleItem setTarget:self];
-        [quickHelpIntegrationStyleMenuItems addObject:quickHelpReferenceLinkStyleItem];
+//        NSMenuItem *quickHelpReferenceLinkStyleItem = [dashMenu addItemWithTitle:@"Replace Quick Help Reference Link" action:@selector(toggleIntegrationStyle:) keyEquivalent:@""];
+//        quickHelpReferenceLinkStyleItem.tag = OMQuickHelpPluginIntegrationStyleReference;
+//        [quickHelpReferenceLinkStyleItem setTarget:self];
+//        [quickHelpIntegrationStyleMenuItems addObject:quickHelpReferenceLinkStyleItem];
 
         _quickHelpIntegrationStyleMenuItems = [quickHelpIntegrationStyleMenuItems copy];
 
         // the default menu option should be to replace the quick help popup
         if (![[NSUserDefaults standardUserDefaults] objectForKey:kOMQuickHelpOpenInDashStyle]) {
+            [[NSUserDefaults standardUserDefaults] setInteger:OMQuickHelpPluginIntegrationStyleQuickHelp forKey:kOMQuickHelpOpenInDashStyle];
+        }
+        
+        if ([[NSUserDefaults standardUserDefaults] integerForKey:kOMQuickHelpOpenInDashStyle] == OMQuickHelpPluginIntegrationStyleReference) {
             [[NSUserDefaults standardUserDefaults] setInteger:OMQuickHelpPluginIntegrationStyleQuickHelp forKey:kOMQuickHelpOpenInDashStyle];
         }
         
